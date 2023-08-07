@@ -1,86 +1,32 @@
-from dataclasses import dataclass
-from pathlib import Path
-
-
-@dataclass(frozen=True)
-class PrepareCallbacksConfig:
-    root_dir: Path
-    tensorboard_root_log_dir: Path
-    checkpoint_model_filepath: Path
-
-
-from cnnClassifier.constants import *
-from cnnClassifier.utils.common import read_yaml, create_directories
-
-class ConfigurationManager:
-    def __init__(
-        self, 
-        config_filepath = CONFIG_FILE_PATH,
-        params_filepath = PARAMS_FILE_PATH):
-        self.config = read_yaml(config_filepath)
-        self.params = read_yaml(params_filepath)
-        create_directories([self.config.artifacts_root])
-
-
-    
-    def get_prepare_callback_config(self) -> PrepareCallbacksConfig:
-        config = self.config.prepare_callbacks
-        model_ckpt_dir = os.path.dirname(config.checkpoint_model_filepath)
-        create_directories([
-            Path(model_ckpt_dir),
-            Path(config.tensorboard_root_log_dir)
-        ])
-
-        prepare_callback_config = PrepareCallbacksConfig(
-            root_dir=Path(config.root_dir),
-            tensorboard_root_log_dir=Path(config.tensorboard_root_log_dir),
-            checkpoint_model_filepath=Path(config.checkpoint_model_filepath)
-        )
-
-        return prepare_callback_config
-
-
+from flask import Flask, request, jsonify, render_template
 import os
-import urllib.request as request
-from zipfile import ZipFile
-import tensorflow as tf
-import time
+from flask_cors import CORS, cross_origin
+from cnnClassifier.utils.common import decodeImage
+from cnnClassifier.pipeline.predict import PredictionPipeline
 
-class PrepareCallback:
-    def __init__(self, config: PrepareCallbacksConfig):
-        self.config = config
+app = Flask(__name__)
 
+@app.route("/")
+@cross_origin()
+def index():
+    return render_template("index.html")
 
+@app.route("/predict", methods=['POST'])
+@cross_origin()
+def predictRoute():
+    if 'image1' not in request.files:
+        return "No image part"
     
-    @property
-    def _create_tb_callbacks(self):
-        timestamp = time.strftime("%Y-%m-%d-%H-%M-%S")
-        tb_running_log_dir = os.path.join(
-            self.config.tensorboard_root_log_dir,
-            f"tb_logs_at_{timestamp}",
-        )
-        return tf.keras.callbacks.TensorBoard(log_dir=tb_running_log_dir)
+    image = request.files['image1']
+    if image.filename == '':
+        return "No selected file"
     
-
-    @property
-    def _create_ckpt_callbacks(self):
-        return tf.keras.callbacks.ModelCheckpoint(
-            filepath=self.config.checkpoint_model_filepath,
-            save_best_only=True
-        )
-
-
-    def get_tb_ckpt_callbacks(self):
-        return [
-            self._create_tb_callbacks,
-            self._create_ckpt_callbacks
-        ]
-
-try:
-    config = ConfigurationManager()
-    prepare_callbacks_config = config.get_prepare_callback_config()
-    prepare_callbacks = PrepareCallback(config=prepare_callbacks_config)
-    callback_list = prepare_callbacks.get_tb_ckpt_callbacks()
+    # Assuming you have a function like 'decodeImage' that handles image processing
+    decoded_image = decodeImage(image.read(),image.filename)  # Replace 'decodeImage' with your actual image processing function
+    classifier = PredictionPipeline(image.filename)
+    result = classifier.predict(decoded_image)  # Call your classifier's predict function
     
-except Exception as e:
-    raise e
+    return render_template('index.html', results=result)
+
+if __name__ == "__main__":
+    app.run(debug=True)
